@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grammar Checker</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+
+        textarea {
+            width: 100%;
+            height: 150px;
+            padding: 10px;
+            font-size: 16px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            resize: vertical;
+        }
+
+        button {
+            width: 100%;
+            padding: 12px;
+            margin-top: 10px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #45a049;
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .result-box {
+            margin-top: 20px;
+            padding: 20px;
+            background: white;
+            border-radius: 5px;
+            line-height: 2;
+            font-size: 18px;
+            display: none;
+            position: relative;
+        }
+
+        .result-box.show {
+            display: block;
+        }
+
+        .highlight {
+            background-color: #bbf7d0;
+            padding: 2px 4px;
+            border-radius: 3px;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .highlight:hover {
+            background-color: #86efac;
+        }
+
+        .inline-popup {
+            display: none;
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: white;
+            border: 2px solid #4CAF50;
+            border-radius: 8px;
+            padding: 10px 15px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            z-index: 1000;
+            white-space: nowrap;
+            margin-bottom: 5px;
+        }
+
+        .inline-popup::after {
+            content: '';
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            border: 6px solid transparent;
+            border-top-color: #4CAF50;
+        }
+
+        .inline-popup.show {
+            display: block;
+        }
+
+        .correction-text {
+            color: #16a34a;
+            font-weight: bold;
+            font-size: 16px;
+        }
+
+        .message {
+            text-align: center;
+            padding: 15px;
+            margin-top: 10px;
+            border-radius: 5px;
+            display: none;
+        }
+
+        .message.show {
+            display: block;
+        }
+
+        .message.error {
+            background: #fee;
+            color: #c00;
+        }
+
+        .message.success {
+            background: #efe;
+            color: #060;
+        }
+    </style>
+</head>
+<body>
+    <h1>Grammar Checker</h1>
+    
+    <textarea id="textInput" placeholder="Type or paste your text here..."></textarea>
+    
+    <button id="checkBtn" onclick="checkText()">Check Grammar</button>
+    
+    <div id="message" class="message"></div>
+    
+    <div id="resultBox" class="result-box"></div>
+
+    <script>
+        let corrections = [];
+        let currentText = '';
+
+        async function checkText() {
+            const text = document.getElementById('textInput').value.trim();
+            const btn = document.getElementById('checkBtn');
+            
+            if (!text) {
+                showMessage('Please enter text', 'error');
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = 'Checking...';
+            hideMessage();
+            document.getElementById('resultBox').classList.remove('show');
+
+            try {
+                const response = await fetch('/check-grammar', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ text })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Check failed');
+                }
+
+                corrections = data.corrections || [];
+                currentText = text;
+
+                if (corrections.length === 0) {
+                    showMessage('No errors found!', 'success');
+                } else {
+                    displayResults();
+                }
+
+            } catch (error) {
+                showMessage(error.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Check Grammar';
+            }
+        }
+
+        function displayResults() {
+            const resultBox = document.getElementById('resultBox');
+            resultBox.innerHTML = renderHighlightedText();
+            resultBox.classList.add('show');
+        }
+
+        function renderHighlightedText() {
+            let result = '';
+            let lastIndex = 0;
+
+            const sorted = [...corrections].sort((a, b) => a.start - b.start);
+
+            sorted.forEach((corr, idx) => {
+                if (corr.start > lastIndex) {
+                    result += escapeHtml(currentText.substring(lastIndex, corr.start));
+                }
+
+                const originalIndex = corrections.indexOf(corr);
+                result += `
+                    <span class="highlight" onclick="togglePopup(event, ${originalIndex})">
+                        ${escapeHtml(currentText.substring(corr.start, corr.end))}
+                        <span class="inline-popup" id="popup-${originalIndex}">
+                            <div class="correction-text" onclick="replaceText(${originalIndex})">${escapeHtml(corr.correction)}</div>
+                        </span>
+                    </span>
+                `;
+
+                lastIndex = corr.end;
+            });
+
+            if (lastIndex < currentText.length) {
+                result += escapeHtml(currentText.substring(lastIndex));
+            }
+
+            return result;
+        }
+
+        function togglePopup(event, index) {
+            event.stopPropagation();
+            
+            // Hide all popups
+            document.querySelectorAll('.inline-popup').forEach(p => p.classList.remove('show'));
+            
+            // Show this popup
+            const popup = document.getElementById(`popup-${index}`);
+            popup.classList.add('show');
+        }
+
+        function replaceText(index) {
+            const corr = corrections[index];
+            
+            // Replace the wrong text with correct text
+            currentText = currentText.substring(0, corr.start) + 
+                         corr.correction + 
+                         currentText.substring(corr.end);
+            
+            // Update textarea
+            document.getElementById('textInput').value = currentText;
+
+            // Calculate position difference
+            const diff = corr.correction.length - (corr.end - corr.start);
+            
+            // Remove this correction and adjust remaining positions
+            corrections = corrections.filter((_, i) => i !== index).map(c => {
+                if (c.start > corr.start) {
+                    return {
+                        ...c,
+                        start: c.start + diff,
+                        end: c.end + diff
+                    };
+                }
+                return c;
+            });
+
+            if (corrections.length === 0) {
+                showMessage('All corrections done!', 'success');
+                document.getElementById('resultBox').classList.remove('show');
+            } else {
+                displayResults();
+            }
+        }
+
+        function showMessage(msg, type) {
+            const message = document.getElementById('message');
+            message.textContent = msg;
+            message.className = 'message show ' + type;
+        }
+
+        function hideMessage() {
+            document.getElementById('message').classList.remove('show');
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Close popups when clicking outside
+        document.addEventListener('click', function() {
+            document.querySelectorAll('.inline-popup').forEach(p => p.classList.remove('show'));
+        });
+    </script>
+</body>
+</html>
