@@ -10,7 +10,7 @@ load_dotenv()
 app = Flask(__name__)
 
 # ⚠️ IMPORTANT: Replace this with your actual Groq API key
-GROQ_API_KEY = "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"
+GROQ_API_KEY = "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"
 API_KEY = os.getenv('GROQ_API_KEY')
 @app.route('/')
 def index():
@@ -141,3 +141,4 @@ if __name__ == '__main__':
     print("📝 Open http://127.0.0.1:5000 in your browser")
     print("=" * 50)
     app.run(debug=True, host='0.0.0.0', port=5000)
+
