@@ -9,7 +9,7 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# Get API key from environment variable (more secure for Render)
+# Get API key from environment variable
 GROQ_API_KEY = os.getenv('GROQ_API_KEY')
 
 @app.route('/')
@@ -36,65 +36,58 @@ def check_grammar():
             messages=[
                 {
                     "role": "system",
-                    "content": """You are a grammar and spelling checker. Analyze the text and return corrections in JSON format.
+                    "content": """You are a precise grammar and spelling checker. Only flag ACTUAL errors.
 
-Check for:
-- Verb tense errors (goes→went, has→had)
-- Subject-verb agreement (I has→have, they was→were)  
-- Spelling mistakes
-- Wrong verb forms
-- Punctuation errors
-- Article errors (a→an, the)
+Check ONLY for these real errors:
+1. Spelling mistakes (e.g., "recieve" → "receive")
+2. Wrong verb tense (e.g., "She go yesterday" → "She went yesterday")
+3. Subject-verb agreement (e.g., "He don't" → "He doesn't")
+4. Wrong verb forms (e.g., "I have ate" → "I have eaten")
+5. Missing articles where required (e.g., "I am student" → "I am a student")
 
-Return a JSON object with this structure:
+DO NOT flag:
+- Capitalization choices (unless it's clearly wrong)
+- Style preferences
+- Correctly spelled words
+- Valid contractions
+
+Return JSON format:
 {
   "corrections": [
     {
-      "wrong": "the incorrect word or phrase",
-      "correct": "the corrected version",
-      "reason": "explanation of the error"
+      "wrong": "exact error text",
+      "correct": "fixed version",
+      "reason": "brief explanation"
     }
   ]
 }
 
-If no errors are found, return: {"corrections": []}"""
+If no errors: {"corrections": []}"""
                 },
                 {
                     "role": "user",
-                    "content": f"Check this text for grammar and spelling errors:\n\n{text}"
+                    "content": f"Check for grammar and spelling errors:\n\n{text}"
                 }
             ],
             model="llama-3.3-70b-versatile",
             temperature=0.1,
             max_tokens=2000,
-            response_format={"type": "json_object"}  # Forces valid JSON
+            response_format={"type": "json_object"}
         )
         
-        # Extract response
+        # Extract and parse response
         content = chat_completion.choices[0].message.content.strip()
         print(f"\n{'='*60}")
-        print(f"API Response:\n{content}")
-        print(f"{'='*60}")
+        print(f"Input: {text}")
+        print(f"API Response: {content}")
         
-        # Parse JSON response
-        try:
-            response_data = json.loads(content)
-            corrections_raw = response_data.get('corrections', [])
-        except json.JSONDecodeError as e:
-            print(f"JSON Parse Error: {e}")
-            print(f"Raw content: {content}")
-            return jsonify({'corrections': []})
+        response_data = json.loads(content)
+        corrections_raw = response_data.get('corrections', [])
         
-        print(f"Parsed corrections: {corrections_raw}")
+        print(f"Parsed: {corrections_raw}")
         
-        # Validate that we got a list
-        if not isinstance(corrections_raw, list):
-            print("Corrections is not a list")
-            return jsonify({'corrections': []})
-        
-        # Convert to position-based format
+        # Convert to exact position-based format
         corrections = []
-        text_lower = text.lower()
         
         for corr in corrections_raw:
             if not isinstance(corr, dict):
@@ -102,31 +95,30 @@ If no errors are found, return: {"corrections": []}"""
                 
             wrong = corr.get('wrong', '').strip()
             correct = corr.get('correct', '').strip()
-            reason = corr.get('reason', 'grammar error')
+            reason = corr.get('reason', '')
             
             if not wrong or not correct:
                 continue
             
-            # Find position of wrong word/phrase in text (case-insensitive)
-            wrong_lower = wrong.lower()
-            pos = text_lower.find(wrong_lower)
+            # Find exact position in original text (case-sensitive)
+            pos = text.find(wrong)
+            
+            # If not found, try case-insensitive
+            if pos == -1:
+                text_lower = text.lower()
+                wrong_lower = wrong.lower()
+                pos = text_lower.find(wrong_lower)
+                
+                if pos != -1:
+                    # Get the actual text from original
+                    wrong = text[pos:pos+len(wrong)]
             
             if pos == -1:
-                print(f"⚠️  Could not find '{wrong}' in text")
-                # Try finding individual words
-                words = wrong.split()
-                if len(words) > 0:
-                    pos = text_lower.find(words[0].lower())
-                    if pos != -1:
-                        wrong = words[0]
-                        print(f"   Found first word '{wrong}' at position {pos}")
-                    else:
-                        continue
-                else:
-                    continue
+                print(f"⚠️ Skipping: '{wrong}' not found in text")
+                continue
             
             corrections.append({
-                'original': text[pos:pos+len(wrong)],  # Preserve original case
+                'original': wrong,
                 'correction': correct,
                 'start': pos,
                 'end': pos + len(wrong),
@@ -134,9 +126,14 @@ If no errors are found, return: {"corrections": []}"""
                 'reason': reason
             })
         
-        print(f"\n✅ Final corrections ({len(corrections)}):")
-        for i, c in enumerate(corrections, 1):
-            print(f"  {i}. '{c['original']}' → '{c['correction']}' ({c['reason']})")
+        # Sort by position
+        corrections.sort(key=lambda x: x['start'])
+        
+        # Remove reason field for cleaner output (optional)
+        for c in corrections:
+            del c['reason']
+        
+        print(f"Final output: {corrections}")
         print(f"{'='*60}\n")
         
         return jsonify({'corrections': corrections})
