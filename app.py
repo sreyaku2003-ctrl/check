@@ -31,68 +31,54 @@ def check_grammar():
         # Initialize Groq client
         client = Groq(api_key=GROQ_API_KEY)
         
-        # Create chat completion - Ask for structured JSON output
+        # Create chat completion - FORCE valid JSON output
         chat_completion = client.chat.completions.create(
             messages=[
                 {
                     "role": "system",
-                    "content": """You are a strict grammar and spelling checker. Find ALL errors.
+                    "content": """You are a grammar checker. Return valid JSON only.
 
 Check for:
-1. Verb tense errors (goes→went, has→had, is→was)
-2. Subject-verb agreement (I has→have, they was→were)
-3. Spelling mistakes (forgetter→forgot, dont→don't)
-4. Wrong verb forms
-5. Punctuation errors
-6. Article errors (a→an, the)
+- Verb tense errors
+- Subject-verb agreement  
+- Spelling mistakes
+- Wrong verb forms
+- Punctuation errors
 
-BE THOROUGH. Even if sentence seems okay, check carefully.
+Return JSON object:
+{
+  "corrections": [
+    {"wrong": "word", "correct": "fix", "reason": "why"}
+  ]
+}
 
-Return ONLY JSON array:
-[
-  {"wrong": "exact word", "correct": "fixed", "reason": "why"}
-]
-
-Examples:
-Input: "She goes to store yesterday"
-Output: [{"wrong": "goes", "correct": "went", "reason": "past tense needed"}]
-
-Input: "I forgetter the keys"
-Output: [{"wrong": "forgetter", "correct": "forgot", "reason": "wrong verb form"}]
-
-Input: "They was happy"
-Output: [{"wrong": "was", "correct": "were", "reason": "subject-verb agreement"}]
-
-Return [] ONLY if genuinely perfect. Otherwise find the errors."""
+CRITICAL: 
+- Return ONLY valid JSON
+- NO extra text or explanations
+- NO || operators
+- Use proper string escaping"""
                 },
-
                 {
                     "role": "user",
-                    "content": f"Check this sentence carefully for ALL grammar and spelling errors:\n\n\"{text}\"\n\nFind every mistake."
+                    "content": f"Find errors in: {text}"
                 }
             ],
             model="llama-3.3-70b-versatile",
-            temperature=0.1,
-            max_tokens=2000,
+            temperature=0,
+            max_tokens=1000,
+            response_format={"type": "json_object"}
         )
         
         # Extract response
         content = chat_completion.choices[0].message.content.strip()
         print(f"\nAPI Response: {content}")
         
-        # Extract JSON from response - IMPROVED ERROR HANDLING
-        json_match = re.search(r'\[.*\]', content, re.DOTALL)
-        if not json_match:
-            print("No JSON found in response")
-            return jsonify({'corrections': []})
-        
-        # Try to parse JSON with error handling
+        # Parse JSON (response_format guarantees valid JSON)
         try:
-            corrections_raw = json.loads(json_match.group())
+            response_data = json.loads(content)
+            corrections_raw = response_data.get('corrections', [])
         except json.JSONDecodeError as e:
             print(f"JSON Parse Error: {e}")
-            print(f"Raw JSON string: {json_match.group()}")
-            # Return empty corrections instead of crashing
             return jsonify({'corrections': []})
         
         print(f"Parsed corrections: {corrections_raw}")
