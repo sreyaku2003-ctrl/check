@@ -9,7 +9,7 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# ⚠️ IMPORTANT: Replace this with your actual Groq API key
+# Get API key from environment variable or use hardcoded value
 GROQ_API_KEY = os.getenv('GROQ_API_KEY')
 
 @app.route('/')
@@ -36,72 +36,62 @@ def check_grammar():
             messages=[
                 {
                     "role": "system",
-                    "content": """You are a strict grammar and spelling checker. Find ALL errors.
+                    "content": """You are a grammar checker. Return ONLY a JSON array, NO explanations.
 
-Check for:
-1. Verb tense errors (goes→went, has→had, is→was)
-2. Subject-verb agreement (I has→have, they was→were)
-3. Spelling mistakes (forgetter→forgot, dont→don't)
-4. Wrong verb forms
-5. Punctuation errors
-6. Article errors (a→an, the)
+Rules:
+- Find grammar/spelling errors
+- Return ONLY the JSON array
+- NO text before or after JSON
+- NO markdown code blocks
+- NO explanations
 
-BE THOROUGH. Even if sentence seems okay, check carefully.
-
-Return ONLY valid JSON array with proper escaping:
-[
-  {"wrong": "exact word", "correct": "fixed", "reason": "why"}
-]
+Format (exact):
+[{"wrong": "word", "correct": "fix", "reason": "why"}]
 
 Examples:
 Input: "She goes to store yesterday"
-Output: [{"wrong": "goes", "correct": "went", "reason": "past tense needed"}]
+Output: [{"wrong": "goes", "correct": "went", "reason": "past tense"}]
 
-Input: "I forgetter the keys"
-Output: [{"wrong": "forgetter", "correct": "forgot", "reason": "wrong verb form"}]
-
-Input: "They was happy"
+Input: "They was happy"  
 Output: [{"wrong": "was", "correct": "were", "reason": "subject-verb agreement"}]
 
-Return [] ONLY if genuinely perfect. Otherwise find the errors."""
+CRITICAL: Return ONLY the JSON array starting with [ and ending with ]"""
                 },
                 
                 {
                     "role": "user",
-                    "content": f"Check this sentence carefully for ALL grammar and spelling errors:\n\n\"{text}\"\n\nFind every mistake."
+                    "content": f"Text: {text}\n\nReturn ONLY JSON array:"
                 }
             ],
             model="llama-3.3-70b-versatile",
-            temperature=0.1,
+            temperature=0,
             max_tokens=2000,
+            response_format={"type": "json_object"}
         )
         
         # Extract response
         content = chat_completion.choices[0].message.content.strip()
         print(f"\nAPI Response: {content}")
         
-        # Extract JSON from response
-        json_match = re.search(r'\[.*\]', content, re.DOTALL)
-        if not json_match:
-            print("No JSON found in response")
-            return jsonify({'corrections': []})
-        
-        # FIX: Better JSON parsing with error handling
+        # Parse JSON response (with json_object mode, it returns {"corrections": [...]})
         try:
-            corrections_raw = json.loads(json_match.group())
+            response_data = json.loads(content)
+            # Handle both formats: {"corrections": [...]} or direct array
+            if isinstance(response_data, dict):
+                corrections_raw = response_data.get('corrections', response_data.get('errors', []))
+            else:
+                corrections_raw = response_data
         except json.JSONDecodeError as e:
             print(f"JSON Parse Error: {e}")
-            print(f"Attempted to parse: {json_match.group()}")
             
-            # Try to fix common issues
-            json_str = json_match.group()
-            # Remove markdown code blocks if present
-            json_str = re.sub(r'```json|```', '', json_str)
-            # Fix unescaped quotes in strings
-            json_str = json_str.replace("\\'", "'")
+            # Fallback: Extract array from text
+            json_match = re.search(r'\[.*\]', content, re.DOTALL)
+            if not json_match:
+                print("No JSON found in response")
+                return jsonify({'corrections': []})
             
             try:
-                corrections_raw = json.loads(json_str)
+                corrections_raw = json.loads(json_match.group())
             except:
                 print("Could not parse JSON even after cleaning")
                 return jsonify({'corrections': []})
@@ -161,4 +151,3 @@ if __name__ == '__main__':
     print("📝 Open http://127.0.0.1:5000 in your browser")
     print("=" * 50)
     app.run(debug=True, host='0.0.0.0', port=5000)
-
